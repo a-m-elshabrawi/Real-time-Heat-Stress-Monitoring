@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bangle.js 2 StorageFile Downloader (Chunked)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Puck.js Web Bluetooth helper -->
+  <script src="https://www.puck-js.com/puck.js"></script>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:2rem;line-height:1.4}
+    .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.5rem 0}
+    input[type=text]{padding:.5rem;border:1px solid #ccc;border-radius:.4rem;min-width:16rem}
+    button{padding:.6rem 1rem;border:0;border-radius:.5rem;cursor:pointer}
+    #connect{background:#2d6cdf;color:#fff}
+    #download{background:#198754;color:#fff}
+    #status{font-size:.95rem;color:#444}
+    pre{background:#111;color:#eee;padding:1rem;border-radius:.5rem;max-height:40vh;overflow:auto}
+    .muted{opacity:.8}
+  </style>
+</head>
+<body>
+  <h1>Bangle.js 2 StorageFile Downloader</h1>
+
+  <div class="row">
+    <button id="connect">Connect</button>
+    <span id="connstate" class="muted">Not connected</span>
+  </div>
+
+  <div class="row">
+    <label for="fname">File name on watch:</label>
+    <input id="fname" type="text" placeholder="e.g. upload.log" />
+    <button id="download" disabled>Download</button>
+  </div>
+
+  <div id="status" class="muted">Tip: Use the exact file name (case-sensitive). Big files are streamed in chunks.</div>
+
+  <h3>Transfer log</h3>
+  <pre id="log"></pre>
+
+<script>
+(() => {
+  const btnConnect = document.getElementById('connect');
+  const btnDownload = document.getElementById('download');
+  const fname = document.getElementById('fname');
+  const logEl = document.getElementById('log');
+  const connState = document.getElementById('connstate');
+  const statusEl = document.getElementById('status');
+
+  let isConnected = false;
+  let conn = null; // <— keep the connection so we can listen for data
+  let receiving = false;
+  let currentFile = '';
+  let receivedChunks = []; // Array<Uint8Array>
+  let receiveCount = 0;
+
+  function log(s){ logEl.textContent += s + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+  function setStatus(s){ statusEl.textContent = s; }
+  function setConnState(s){ connState.textContent = s; }
+
+  function decodeBase64ToUint8Array(b64) {
+    const bin = atob(b64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i=0;i<len;i++) bytes[i] = bin.charCodeAt(i) & 255;
+    return bytes;
+  }
+
+  // Clean up any previous data listeners
+  function removeAllDataListeners() {
+    if (conn && conn.removeListener) {
+      try { conn.removeListener('data', onPuckData); } catch(e) {}
+    }
+  }
+
+  function onPuckData(d) {
+    // Data arrives in arbitrary chunking; process by lines
+    buffer += d;
+    let idx;
+    while ((idx = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+
+      if (!line) continue;
+
+      // Protocol:
+      // BEGIN:<filename>
+      // DATA:<base64>
+      // END:<filename>
+      if (line.startsWith("BEGIN:")) {
+        currentFile = line.slice(6);
+        receivedChunks = [];
+        receiveCount = 0;
+        receiving = true;
+        log(`> BEGIN ${currentFile}`);
+        setStatus("Receiving data...");
+      } else if (line.startsWith("DATA:")) {
+        if (!receiving) continue; // ignore stray
+        const b64 = line.slice(5);
+        try {
+          const bytes = decodeBase64ToUint8Array(b64);
+          receivedChunks.push(bytes);
+          receiveCount += bytes.length;
+          if ((receivedChunks.length % 20) === 0) setStatus(`Receiving data... ${Math.round(receiveCount/1024)} KB`);
+        } catch (e) {
+          log(`! DATA decode error: ${e}`);
+        }
+      } else if (line.startsWith("END:")) {
+        const name = line.slice(4);
+        if (receiving && name === currentFile) {
+          receiving = false;
+          const totalLen = receivedChunks.reduce((a,b)=>a+b.length,0);
+          const out = new Uint8Array(totalLen);
+          let offset = 0;
+          for (const chunk of receivedChunks) {
+            out.set(chunk, offset);
+            offset += chunk.length;
+          }
+          const blob = new Blob([out], { type: "application/octet-stream" });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = currentFile || 'bangle_file.bin';
+          a.click();
+          URL.revokeObjectURL(a.href);
+          log(`> END ${name} (${Math.round(totalLen/1024)} KB)`);
+          setStatus(`Download complete: ${name} (${Math.round(totalLen/1024)} KB)`);
+        }
+      } else {
+        // Optional: surface any other prints from the watch
+        log(line);
+      }
+    }
+  }
+  let buffer = "";
+
+  btnConnect.addEventListener('click', async () => {
+    setStatus("Connecting to Bangle.js 2...");
+    try {
+      removeAllDataListeners();
+      await new Promise((resolve, reject) => {
+        Puck.connect(function(c) {
+          if (!c) return reject(new Error("User cancelled or device not found."));
+          // Connection established
+          conn = c;                 // <— save it
+          isConnected = true;
+          setConnState("Connected");
+          setStatus("Connected. You can download files now.");
+          // Make sure we don't echo typed characters back
+          c.autoReconnect = true;
+          resolve();
+        });
+      });
+      // Route incoming data on the connection
+      if (conn && conn.on) conn.on('data', onPuckData);
+      btnDownload.disabled = false;
+    } catch (e) {
+      isConnected = false;
+      setConnState("Not connected");
+      setStatus("Connection failed. Try again. (Use Chrome/Edge desktop, Bluetooth ON.)");
+      log(`! ${e.message || e}`);
+    }
+  });
+
+  btnDownload.addEventListener('click', async () => {
+    const name = (fname.value || "").trim();
+    if (!isConnected) { setStatus("Not connected."); return; }
+    if (!name) { setStatus("Enter a file name (e.g., upload.log)."); return; }
+
+    // Espruino-side snippet:
+    // - Reads StorageFile in small chunks (CHUNK bytes)
+    // - Base64 encodes each chunk (btoa)
+    // - Sends BEGIN/DATA/END framed lines to host
+    const CHUNK = 265; // conservative to avoid BLE buffers overflowing
+    const delayMs = 30; // pacing between chunks
+    const code =
+`(function(){
+  try {
+    var n=${JSON.stringify(name)};
+    var f=require("Storage").open(n,"r");
+    if(!f){ Bluetooth.println("!ERR:OPEN_FAILED:"+n); return; }
+    Bluetooth.println("BEGIN:"+n);
+    var CHUNK=${CHUNK};
+    function send(){
+      var s=f.read(CHUNK);
+      if(!s||s.length===0){
+        Bluetooth.println("END:"+n);
+        return;
+      }
+      // Base64 encode to keep binary-safe over text pipe
+      Bluetooth.println("DATA:"+btoa(s));
+      setTimeout(send, ${delayMs});
+    }
+    send();
+  } catch(e){
+    Bluetooth.println("!ERR:"+e);
+  }
+})();\n`;
+
+    // Reset receive buffers
+    buffer = "";
+    receiving = false;
+    receivedChunks = [];
+    receiveCount = 0;
+    currentFile = name;
+    setStatus("Request sent. Waiting for data...");
+    log(`Requesting: ${name}`);
+
+    // Write code to watch
+    try {
+      await new Promise((resolve, reject) => {
+        (conn && conn.write ? conn.write : Puck.write)(code, function(ok) {
+          if (!ok) return reject(new Error("Write failed"));
+          resolve();
+        });
+      });
+    } catch (e) {
+      setStatus("Failed to start transfer.");
+      log(`! ${e.message || e}`);
+    }
+  });
+
+  // Basic disconnect detection (best-effort)
+  window.addEventListener('unload', () => {
+    try { removeAllDataListeners(); } catch(e){}
+  });
+})();
+</script>
+</body>
+</html>

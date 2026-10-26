@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HeatWatch — Heat Stress Monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://www.puck-js.com/puck.js"></script>
+
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #1f2937;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #58a6ff;
+      --low:       #3fb950;
+      --moderate:  #d29922;
+      --high:      #f0883e;
+      --severe:    #f85149;
+      --flag:      #f85149;
+      --font-mono: 'JetBrains Mono','Fira Mono','Courier New',monospace;
+      --font-ui:   'Inter',system-ui,-apple-system,sans-serif;
+      --radius:    8px;
+      --radius-lg: 14px;
+      --tr:        150ms ease;
+    }
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--text); font-family:var(--font-ui);
+           font-size:14px; line-height:1.5; min-height:100vh; }
+
+    /* ── Header ── */
+    .app-header { border-bottom:1px solid var(--border); padding:14px 24px;
+      display:flex; align-items:center; gap:14px; background:var(--surface); }
+    .app-header .logo { font-size:18px; font-weight:700; letter-spacing:-.5px; }
+    .app-header .logo span { color:var(--accent); }
+    .app-header .tagline { font-size:11px; color:var(--muted);
+      border-left:1px solid var(--border); padding-left:14px; }
+    .conn-badge { margin-left:auto; font-size:11px; padding:3px 10px;
+      border-radius:99px; background:var(--surface2); border:1px solid var(--border);
+      color:var(--muted); display:flex; align-items:center; gap:6px; }
+    .conn-badge .dot { width:7px; height:7px; border-radius:50%; background:var(--muted); }
+    .conn-badge.connected .dot { background:var(--low); }
+    .conn-badge.connected { color:var(--low); border-color:var(--low); }
+
+    /* ── Layout ── */
+    .main { display:grid; grid-template-columns:280px 1fr; min-height:calc(100vh - 53px); }
+
+    /* ── Sidebar ── */
+    .sidebar { background:var(--surface); border-right:1px solid var(--border);
+      padding:20px 16px; display:flex; flex-direction:column; gap:20px; }
+    .sidebar section { display:flex; flex-direction:column; gap:8px; }
+    .section-label { font-size:10px; font-weight:600; letter-spacing:1.2px;
+      text-transform:uppercase; color:var(--muted); padding-bottom:4px;
+      border-bottom:1px solid var(--border); }
+
+    .btn { display:flex; align-items:center; justify-content:center; gap:8px;
+      padding:9px 14px; border:1px solid var(--border); border-radius:var(--radius);
+      background:var(--surface2); color:var(--text); font-size:13px;
+      font-family:var(--font-ui); cursor:pointer;
+      transition:background var(--tr),border-color var(--tr); width:100%; }
+    .btn:hover { background:#2d333b; border-color:var(--accent); }
+    .btn:disabled { opacity:.4; cursor:not-allowed; }
+    .btn.primary { background:var(--accent); color:#0d1117;
+      border-color:var(--accent); font-weight:600; }
+    .btn.primary:hover { background:#79b8ff; }
+    .btn.danger { border-color:var(--flag); color:var(--flag); }
+    .btn.danger:hover { background:rgba(248,81,73,.1); }
+
+    .status-text { font-size:11px; color:var(--muted); text-align:center; min-height:16px; }
+
+    /* Tabs */
+    .tab-bar { display:flex; border-bottom:1px solid var(--border); margin-bottom:4px; }
+    .tab-btn { flex:1; padding:7px 4px; font-size:12px; font-weight:500;
+      background:none; border:none; border-bottom:2px solid transparent;
+      color:var(--muted); cursor:pointer;
+      transition:color var(--tr),border-color var(--tr); }
+    .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+    /* Legend */
+    .legend { display:flex; flex-direction:column; gap:5px; }
+    .legend-item { display:flex; align-items:center; gap:8px; font-size:11px; }
+    .legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .legend-item .range { margin-left:auto; color:var(--muted);
+      font-family:var(--font-mono); font-size:10px; }
+
+    .threshold-list { display:flex; flex-direction:column; gap:4px; }
+    .threshold-item { display:flex; align-items:center; gap:6px;
+      font-size:11px; color:var(--muted); }
+    .threshold-item .flag-dot { width:6px; height:6px; border-radius:50%;
+      background:var(--flag); flex-shrink:0; }
+
+    /* ── Content ── */
+    .content { padding:24px; overflow:auto; display:flex; flex-direction:column; gap:24px; }
+
+    .panel { background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius-lg); overflow:hidden; }
+    .panel-header { display:flex; align-items:center; justify-content:space-between;
+      padding:12px 18px; border-bottom:1px solid var(--border); background:var(--surface2); }
+    .panel-header h2 { font-size:13px; font-weight:600; }
+    .panel-header .meta { font-size:11px; color:var(--muted); }
+    .panel-body { padding:18px; }
+
+    /* ── Score cards ── */
+    .score-display { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+    .score-card { flex:1; min-width:120px; background:var(--surface2);
+      border:1px solid var(--border); border-radius:var(--radius);
+      padding:14px 16px; position:relative; cursor:default;
+      transition:border-color var(--tr); }
+    .score-card:hover { border-color:var(--accent); }
+    .score-card.abnormal { border-color:var(--flag); }
+    .score-card .card-label { font-size:10px; font-weight:600; letter-spacing:1px;
+      text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+    .score-card .card-value { font-size:28px; font-weight:700;
+      font-family:var(--font-mono); line-height:1; margin-bottom:4px; }
+    .score-card .card-unit { font-size:11px; color:var(--muted); }
+    .score-card .flag-marker { position:absolute; top:10px; right:10px;
+      width:8px; height:8px; border-radius:50%; background:var(--flag); display:none; }
+    .score-card.abnormal .flag-marker { display:block; }
+    .hsrs-card { min-width:160px; border-width:2px; }
+    .hsrs-card .card-value { font-size:38px; }
+    .hsrs-tier-badge { display:inline-block; padding:2px 10px; border-radius:99px;
+      font-size:11px; font-weight:600; margin-top:6px; }
+
+    /* ── Tooltip ── */
+    .tooltip { display:none; position:fixed; z-index:1000; max-width:300px;
+      background:#1c2230; border:1px solid var(--border); border-radius:var(--radius);
+      padding:12px 14px; box-shadow:0 8px 32px rgba(0,0,0,.6);
+      pointer-events:none; font-size:12px; line-height:1.6; }
+    .tooltip.visible { display:block; }
+    .tooltip .tt-title { font-weight:700; font-size:13px; margin-bottom:6px;
+      display:flex; align-items:center; gap:6px; }
+    .tooltip .tt-title .tt-dot { width:9px; height:9px; border-radius:50%; }
+    .tooltip .tt-body { color:#c9d1d9; }
+    .tooltip .tt-clinical { margin-top:8px; padding-top:8px;
+      border-top:1px solid var(--border); font-size:11px; color:var(--muted); }
+    .tooltip .tt-clinical strong { color:var(--text); }
+
+    /* ── Table ── */
+    .data-table-wrap { overflow:auto; max-height:60vh; }
+    table { width:100%; border-collapse:collapse; font-size:12px; font-family:var(--font-mono); }
+    thead th { text-align:left; padding:8px 12px; font-size:10px; font-weight:600;
+      letter-spacing:.8px; text-transform:uppercase; color:var(--muted);
+      border-bottom:1px solid var(--border); background:var(--surface2); white-space:nowrap;
+      position:sticky; top:0; z-index:10; }
+    thead th.sortable { cursor:pointer; user-select:none; }
+    thead th.sortable:hover { color:var(--accent); }
+    thead th.sort-asc,
+    thead th.sort-desc { color:var(--accent); }
+    thead th .sort-icon { margin-left:4px; opacity:.5; font-style:normal; font-size:9px; }
+    thead th.sort-asc  .sort-icon,
+    thead th.sort-desc .sort-icon { opacity:1; }
+    tbody tr { border-bottom:1px solid rgba(48,54,61,.5);
+      transition:background var(--tr); cursor:pointer; }
+    tbody tr:hover { background:var(--surface2); }
+    tbody tr.row-selected { background:rgba(88,166,255,.08); }
+    tbody td { padding:7px 12px; vertical-align:middle; white-space:nowrap; }
+    tbody td.abnormal { color:var(--flag); font-weight:600; }
+
+    .tier-low    { color:var(--low); }
+    .tier-mod    { color:var(--moderate); }
+    .tier-high   { color:var(--high); }
+    .tier-severe { color:var(--severe); }
+
+    .tier-pill { display:inline-block; padding:2px 8px; border-radius:99px;
+      font-size:10px; font-weight:600; font-family:var(--font-ui); }
+    .tier-pill.low    { background:rgba(63,185,80,.15);  color:var(--low);
+      border:1px solid rgba(63,185,80,.3); }
+    .tier-pill.mod    { background:rgba(210,153,34,.15); color:var(--moderate);
+      border:1px solid rgba(210,153,34,.3); }
+    .tier-pill.high   { background:rgba(240,136,62,.15); color:var(--high);
+      border:1px solid rgba(240,136,62,.3); }
+    .tier-pill.severe { background:rgba(248,81,73,.15);  color:var(--severe);
+      border:1px solid rgba(248,81,73,.3); }
+
+    /* ── Progress bar (BLE transfer) ── */
+    .progress-wrap { margin:8px 0; }
+    .progress-bar-track { height:4px; background:var(--surface2);
+      border-radius:2px; overflow:hidden; border:1px solid var(--border); }
+    .progress-bar-fill { height:100%; background:var(--accent);
+      border-radius:2px; width:0%; transition:width .3s ease; }
+    .progress-label { font-size:10px; color:var(--muted); margin-top:4px; }
+
+    /* ── Empty state ── */
+    .empty-state { display:flex; flex-direction:column; align-items:center;
+      justify-content:center; gap:10px; padding:60px 24px;
+      color:var(--muted); text-align:center; }
+    .empty-state .icon { font-size:32px; opacity:.4; }
+    .empty-state p { font-size:13px; }
+
+    /* ── Live dot ── */
+    .live-dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+      background:var(--low); animation:pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:.4; transform:scale(.75); }
+    }
+
+    /* ── Stats bar ── */
+    .stats-bar { display:flex; gap:12px; flex-wrap:wrap; padding:12px 18px;
+      border-top:1px solid var(--border); margin-top:0; }
+    .stat-item { display:flex; flex-direction:column; gap:2px; min-width:90px; }
+    .stat-item .stat-label { font-size:10px; color:var(--muted);
+      text-transform:uppercase; letter-spacing:.8px; }
+    .stat-item .stat-value { font-size:16px; font-weight:700; font-family:var(--font-mono); }
+
+    /* ── Log ── */
+    .log-pre { background:#0d1117; color:#8b949e; padding:12px;
+      border-radius:var(--radius); font-family:var(--font-mono); font-size:11px;
+      max-height:160px; overflow-y:auto; border:1px solid var(--border); }
+
+    #file-input { display:none; }
+
+    ::-webkit-scrollbar { width:6px; height:6px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+
+    @media (max-width:768px) {
+      .main { grid-template-columns:1fr; }
+      .sidebar { border-right:none; border-bottom:1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="logo">Heat<span>Watch</span></div>
+  <div class="tagline">Heat Stress Monitoring · Bangle.js 2 · Kuwait University</div>
+  <div class="conn-badge" id="conn-badge">
+    <span class="dot"></span>
+    <span id="conn-label">Disconnected</span>
+  </div>
+</header>
+
+<!-- Singleton tooltip -->
+<div class="tooltip" id="tooltip">
+  <div class="tt-title">
+    <span class="tt-dot" id="tt-dot"></span>
+    <span id="tt-title-text"></span>
+  </div>
+  <div class="tt-body" id="tt-body"></div>
+  <div class="tt-clinical" id="tt-clinical"></div>
+</div>
+
+<div class="main">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar">
+
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-live"     onclick="switchMode('live')">⬤ Live BLE</button>
+      <button class="tab-btn"        id="tab-analysis" onclick="switchMode('analysis')">📊 Analysis</button>
+    </div>
+
+    <!-- Live controls -->
+    <section id="sidebar-live">
+      <div class="section-label">Connection</div>
+      <button class="btn primary" id="btn-connect"    onclick="bleConnect()">Connect to Watch</button>
+      <button class="btn danger"  id="btn-disconnect" onclick="bleDisconnect()" disabled>Disconnect</button>
+      <div class="status-text"   id="ble-status">Not connected</div>
+      <!-- Transfer progress (hidden until active) -->
+      <div class="progress-wrap" id="progress-wrap" style="display:none">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="progress-fill"></div>
+        </div>
+        <div class="progress-label" id="progress-label">Receiving…</div>
+      </div>
+    </section>
+
+    <!-- Analysis controls -->
+    <section id="sidebar-analysis" style="display:none">
+      <div class="section-label">Data Source</div>
+      <input type="file" id="file-input" accept=".log,.csv,.txt"
+             onchange="handleFileUpload(event)" />
+      <button class="btn primary"
+              onclick="document.getElementById('file-input').click()">Upload Data File</button>
+      <div class="status-text" id="upload-status">Accepts .log (JSONL) or .csv</div>
+    </section>
+
+    <!-- HSRS Legend -->
+    <section>
+      <div class="section-label">HSRS Risk Tiers</div>
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--low)"></div>
+          <span>Low</span><span class="range">0 – 3</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--moderate)"></div>
+          <span>Moderate</span><span class="range">3 – 5</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--high)"></div>
+          <span>High</span><span class="range">5 – 7</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background:var(--severe)"></div>
+          <span>Severe</span><span class="range">7 – 10</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Thresholds -->
+    <section>
+      <div class="section-label">Abnormal Thresholds</div>
+      <div class="threshold-list">
+        <div class="threshold-item"><span class="flag-dot"></span>HR &gt; 130 bpm</div>
+        <div class="threshold-item"><span class="flag-dot"></span>Core temp &gt; 39.5 °C</div>
+        <div class="threshold-item"><span class="flag-dot"></span>Heat index &gt; 41 °C</div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ── Main content ── -->
+  <main class="content" id="main-content">
+
+    <!-- LIVE VIEW -->
+    <div id="view-live">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Latest Reading</h2>
+          <div class="meta" id="live-meta">Waiting for data…</div>
+        </div>
+        <div class="panel-body">
+          <div class="score-display" id="live-cards">
+            <div class="empty-state" style="width:100%;padding:40px 0">
+              <div class="icon">📡</div>
+              <p>Connect to Bangle.js 2 — data will load automatically.</p>
+              <p style="font-size:11px">Requires Chrome / Edge desktop with Bluetooth enabled.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live session table — grows row by row as data arrives -->
+      <div class="panel" id="live-table-panel" style="display:none">
+        <div class="panel-header">
+          <h2>Session Log</h2>
+          <div class="meta" id="live-table-meta">0 records</div>
+        </div>
+        <div class="panel-body" style="padding:0">
+          <div class="data-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th><th>Timestamp</th><th>HSRS</th><th>Tier</th>
+                  <th>HR (bpm)</th><th>Core Temp (°C)</th>
+                  <th>Heat Index (°C)</th><th>Amb. Temp (°C)</th><th>Humidity (%)</th>
+                </tr>
+              </thead>
+              <tbody id="live-table-body"></tbody>
+            </table>
+          </div>
+          <div class="stats-bar" id="live-stats-bar" style="display:none">
+            <div class="stat-item">
+              <div class="stat-label">Records</div>
+              <div class="stat-value" id="ls-n">—</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Mean HSRS</div>
+              <div class="stat-value" id="ls-mean">—</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Peak HSRS</div>
+              <div class="stat-value" id="ls-peak">—</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Severe events</div>
+              <div class="stat-value tier-severe" id="ls-severe">—</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Abnormal flags</div>
+              <div class="stat-value" style="color:var(--flag)" id="ls-flags">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BLE log -->
+      <div class="panel">
+        <div class="panel-header"><h2>BLE Transfer Log</h2></div>
+        <div class="panel-body" style="padding:12px">
+          <div class="log-pre" id="ble-log">Waiting for connection…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANALYSIS VIEW -->
+    <div id="view-analysis" style="display:none">
+
+      <div class="panel" id="panel-snapshot" style="display:none">
+        <div class="panel-header">
+          <h2>Selected Reading</h2>
+          <div class="meta" id="snapshot-ts">—</div>
+        </div>
+        <div class="panel-body">
+          <div class="score-display" id="snapshot-cards"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Session Data</h2>
+          <div class="meta" id="table-meta">No data loaded</div>
+        </div>
+        <div class="panel-body" style="padding:0">
+          <div id="table-container">
+            <div class="empty-state">
+              <div class="icon">📂</div>
+              <p>Upload a processed <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">.csv</code>
+                 or raw <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">.log</code> file.</p>
+            </div>
+          </div>
+          <div class="stats-bar" id="stats-bar" style="display:none">
+            <div class="stat-item"><div class="stat-label">Records</div>
+              <div class="stat-value" id="stat-n">—</div></div>
+            <div class="stat-item"><div class="stat-label">Mean HSRS</div>
+              <div class="stat-value" id="stat-mean">—</div></div>
+            <div class="stat-item"><div class="stat-label">Peak HSRS</div>
+              <div class="stat-value" id="stat-peak">—</div></div>
+            <div class="stat-item"><div class="stat-label">Severe events</div>
+              <div class="stat-value tier-severe" id="stat-severe">—</div></div>
+            <div class="stat-item"><div class="stat-label">High events</div>
+              <div class="stat-value tier-high" id="stat-high">—</div></div>
+            <div class="stat-item"><div class="stat-label">Abnormal flags</div>
+              <div class="stat-value" style="color:var(--flag)" id="stat-flags">—</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ SCRIPT ══ -->
+<script>
+'use strict';
+
+// ── Clinical interpretation database ──────────────────────────────────────
+// Sources: Moran, Shitzer & Pandolf 1998 (PSI); Bouchama & Knochel 2002 (NEJM);
+//          ACSM vigorous-intensity HR convention; NWS Heat Index categories.
+const CLINICAL = {
+  hsrs: {
+    low: {
+      title: 'Low Heat Stress (HSRS 0–3)',
+      body: 'Physiological strain within normal resting range. Core temperature and heart rate indicate adequate thermoregulation.',
+      clinical: '<strong>Clinical note:</strong> No intervention required. Maintain standard hydration and continue normal activity.'
+    },
+    mod: {
+      title: 'Moderate Heat Stress (HSRS 3–5)',
+      body: 'Early physiological strain detected. The body is compensating but thermal load is elevated above baseline.',
+      clinical: '<strong>Clinical note:</strong> Early heat-exhaustion precursor state. Increase fluid intake, reduce exertion intensity, and seek shade or a cooled environment within 20–30 min.'
+    },
+    high: {
+      title: 'High Heat Stress (HSRS 5–7)',
+      body: 'Significant physiological strain consistent with moderate-to-severe heat exhaustion. Thermoregulatory system under sustained load.',
+      clinical: '<strong>Clinical note (heat exhaustion onset):</strong> Expected signs include heavy sweating, weakness, and nausea. Immediate rest in a cool environment with oral rehydration is required. Medical monitoring is advised if symptoms persist beyond 30 min.'
+    },
+    severe: {
+      title: 'Severe Heat Stress (HSRS 7–10)',
+      body: 'Critical physiological strain. Score indicates proximity to heat-stroke onset threshold (CT ≥ 40 °C; Bouchama & Knochel 2002).',
+      clinical: '<strong>Clinical note (heat-stroke onset risk):</strong> CNS dysfunction — confusion, loss of coordination — may be imminent. Activate emergency cooling protocol immediately (cold-water immersion or ice packs to neck, axillae, groin). Seek emergency medical care. Do not leave individual unattended.'
+    }
+  },
+  hr: {
+    normal: {
+      title: 'Heart Rate — Within Range',
+      body: 'Resting-to-moderate exertion HR (≤ 130 bpm). Within the ACSM moderate-intensity zone.',
+      clinical: null
+    },
+    abnormal: {
+      title: 'Heart Rate — Elevated ⚠',
+      body: 'HR exceeds 130 bpm — the ACSM vigorous-intensity threshold. In a heat-stress context, elevated HR reflects increased cardiovascular demand for cutaneous vasodilation (skin-surface cooling).',
+      clinical: '<strong>Clinical note:</strong> Sustained HR > 130 bpm during heat exposure predicts heat-exhaustion progression. Reduce exertion, move to a cool environment, and monitor for dizziness or syncope.'
+    }
+  },
+  ct: {
+    normal: {
+      title: 'Core Temperature — Within Range',
+      body: 'Estimated core temperature ≤ 39.5 °C. Kalman-filtered estimate derived from HR series (EKF parameters: b₀ = −7887.1, b₁ = 384.43, b₂ = −4.57).',
+      clinical: null
+    },
+    abnormal: {
+      title: 'Core Temperature — Elevated ⚠',
+      body: 'Estimated CT exceeds 39.5 °C — approaching clinical hyperthermia. The Bouchama & Knochel (2002) heat-stroke diagnostic criterion is CT ≥ 40 °C.',
+      clinical: '<strong>Clinical note (pre-heat-stroke zone):</strong> CT 39.5–40 °C is a critical warning window. Immediate passive and active cooling is required. At CT ≥ 40 °C, heat stroke is clinically confirmed — irreversible organ damage risk escalates sharply.'
+    }
+  },
+  hi: {
+    normal: {
+      title: 'Heat Index — Within Range',
+      body: 'Apparent temperature (Rothfusz regression on ambient temperature + relative humidity) ≤ 41 °C. Environmental thermal load is moderate.',
+      clinical: null
+    },
+    abnormal: {
+      title: 'Heat Index — Danger Zone ⚠',
+      body: 'Heat index exceeds 41 °C, corresponding to the NWS "Danger" category. Represents perceived thermal load on a person in shade with light wind.',
+      clinical: '<strong>Clinical note (environmental danger zone):</strong> Heat cramps and heat exhaustion are highly likely with prolonged exposure. Heat stroke is possible with sustained physical exertion. A healthy adult at rest faces significant risk after approximately 1 hour of unshaded exposure.'
+    }
+  }
+};
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const THRESHOLDS = { hr: 130, ct: 39.5, hi: 41 };
+
+const TIER_MAP = [
+  { min:0,  max:3,  label:'Low',      cls:'low',    color:'#3fb950' },
+  { min:3,  max:5,  label:'Moderate', cls:'mod',    color:'#d29922' },
+  { min:5,  max:7,  label:'High',     cls:'high',   color:'#f0883e' },
+  { min:7,  max:10, label:'Severe',   cls:'severe', color:'#f85149' },
+];
+
+function getTier(score) {
+  for (const t of TIER_MAP) if (score >= t.min && score <= t.max) return t;
+  return TIER_MAP[TIER_MAP.length - 1];
+}
+
+// ── Rothfusz HI — direct JS port of compute_rothfusz.py ───────────────────
+function computeHI(T_C, RH) {
+  const T = T_C * 1.8 + 32;
+  let HI = -42.379 + 2.04901523*T + 10.14333127*RH
+           - 0.22475541*T*RH - 0.00683783*T*T - 0.05481717*RH*RH
+           + 0.00122874*T*T*RH + 0.00085282*T*RH*RH - 0.00000199*T*T*RH*RH;
+  if (RH < 13 && T >= 80 && T <= 112)
+    HI -= ((13 - RH) / 4) * Math.sqrt((17 - Math.abs(T - 95)) / 17);
+  else if (RH > 85 && T >= 80 && T <= 87)
+    HI += ((RH - 85) / 10) * ((87 - T) / 5);
+  return (HI - 32) * 5 / 9;
+}
+
+// ── Kalman batch — direct JS port of compute_ct_kalman.py ─────────────────
+// NOTE: JS IEEE-754 accumulation order may produce values ±0.01 °C
+// from the Python pipeline. For authoritative CT, use Python-processed CSV.
+function runKalmanBatch(hrSeries, ctStart = 37.0) {
+  const a = 1.0, gamma = 0.022 ** 2;
+  const b0 = -7887.1, b1 = 384.4286, b2 = -4.5714, sigma = 18.88 ** 2;
+  let x = ctStart, v = 0.0;
+  return hrSeries.map(z => {
+    const xp  = a * x;
+    const vp  = (a**2)*v + gamma;
+    const cvc = 2*b2*xp + b1;
+    const k   = (vp*cvc) / ((cvc**2)*vp + sigma);
+    const hx  = b2*(xp**2) + b1*xp + b0;
+    x = xp + k*(z - hx);
+    v = (1 - k*cvc)*vp;
+    return +x.toFixed(2);
+  });
+}
+
+// ── Kalman streaming — single-step, state held in module-level vars ────────
+let _kx = 37.0, _kv = 0.0;
+function resetKalman() { _kx = 37.0; _kv = 0.0; }
+function kalmanStep(z) {
+  const a = 1.0, gamma = 0.022**2;
+  const b0 = -7887.1, b1 = 384.4286, b2 = -4.5714, sigma = 18.88**2;
+  const xp  = _kx;
+  const vp  = (a**2)*_kv + gamma;
+  const cvc = 2*b2*xp + b1;
+  const k   = (vp*cvc) / ((cvc**2)*vp + sigma);
+  const hx  = b2*(xp**2) + b1*xp + b0;
+  _kx = xp + k*(z - hx);
+  _kv = (1 - k*cvc)*vp;
+  return +_kx.toFixed(2);
+}
+
+// ── HSRS scoring — direct JS port of compute_hsrs.py ─────────────────────
+function interp(val, xs, ys) {
+  if (val <= xs[0]) return ys[0];
+  if (val >= xs[xs.length-1]) return ys[ys.length-1];
+  for (let i = 0; i < xs.length-1; i++) {
+    if (val >= xs[i] && val <= xs[i+1]) {
+      const t = (val - xs[i]) / (xs[i+1] - xs[i]);
+      return ys[i] + t*(ys[i+1] - ys[i]);
+    }
+  }
+}
+const ctScore = ct => interp(ct, [36.5,37.5,38.5,40.0,42.0], [0,2,6,9,10]);
+const hrScore = hr => interp(hr, [60,100,130,160,200],        [0,2,5,8,10]);
+const hiScore = hi => interp(hi, [20,32,41,54,60],            [0,2,5,9,10]);
+const finalHSRS = (ct, hr, hi) =>
+  +(0.5*ctScore(ct) + 0.3*hrScore(hr) + 0.2*hiScore(hi)).toFixed(2);
+
+// ── HSRS is computed directly from the closed-form rubric (finalHSRS above) ─
+const APP_BUILD = '2026-10-20a-rubric-direct';   // bump on every edit; shown in BLE log
+const rubricHSRS = finalHSRS;
+
+// ── 10-minute bucketing (design spec §6.1, Option A) ──────────────────────
+// Live watch data arrives at 1-min cadence; training used 10-min averages and
+// the CT Kalman filter steps once per training row. So we average 1-min rows
+// into 10-min buckets and step the filter once per closed bucket.
+function bucketKey(ts) {                // floor timestamp to a 10-min boundary
+  const d = new Date((ts || '').replace(' ', 'T'));
+  if (isNaN(d)) return null;
+  d.setMinutes(Math.floor(d.getMinutes() / 10) * 10, 0, 0);
+  return d.getTime();
+}
+let _bkKey = null, _bkN = 0, _bkHr = 0, _bkTemp = 0, _bkHum = 0, _bkTs = null, _bkFallback = 0;
+function resetBucket() { _bkKey = null; _bkN = 0; _bkHr = _bkTemp = _bkHum = 0; _bkTs = null; _bkFallback = 0; }
+async function scoreBucket() {
+  if (_bkN === 0) return null;
+  const hr = _bkHr / _bkN, temp = _bkTemp / _bkN, hum = _bkHum / _bkN;
+  const ct = kalmanStep(hr);           // one filter step per 10-min bucket
+  const hi = computeHI(temp, hum);
+  const hsrs = rubricHSRS(ct, hr, hi);   // HSRS computed directly from the closed-form rubric
+  return { ts: _bkTs || '—', hr, temp, hum, ct, hi, hsrs, hsrs_rubric: hsrs };
+}
+async function feedRaw(row) {            // returns a 10-min record when a bucket closes
+  const hr = parseFloat(row.hr), temp = parseFloat(row.temp), hum = parseFloat(row.w_hum);
+  if (isNaN(hr) || isNaN(temp) || isNaN(hum)) return null;
+  let key = bucketKey(row.ts);
+  if (key === null) { key = Math.floor(_bkFallback / 10); }  // no parseable ts → every 10 rows
+  _bkFallback++;
+  let done = null;
+  if (_bkKey !== null && key !== _bkKey) { done = await scoreBucket(); resetBucket(); }
+  if (_bkKey === null) _bkKey = key;
+  _bkN++; _bkHr += hr; _bkTemp += temp; _bkHum += hum; _bkTs = row.ts;
+  return done;
+}
+async function flushBucket() { const r = await scoreBucket(); resetBucket(); return r; }
+
+// ── Mode switching ─────────────────────────────────────────────────────────
+function switchMode(mode) {
+  document.getElementById('view-live').style.display     = mode==='live'     ? '' : 'none';
+  document.getElementById('view-analysis').style.display = mode==='analysis' ? '' : 'none';
+  document.getElementById('sidebar-live').style.display     = mode==='live'     ? '' : 'none';
+  document.getElementById('sidebar-analysis').style.display = mode==='analysis' ? '' : 'none';
+  document.getElementById('tab-live').classList.toggle('active',     mode==='live');
+  document.getElementById('tab-analysis').classList.toggle('active', mode==='analysis');
+}
+
+// ── Tooltip ────────────────────────────────────────────────────────────────
+const tooltip = document.getElementById('tooltip');
+function showTooltip(evt, info) {
+  document.getElementById('tt-dot').style.background = info.color || '#8b949e';
+  document.getElementById('tt-title-text').textContent = info.title;
+  document.getElementById('tt-body').textContent       = info.body;
+  const cl = document.getElementById('tt-clinical');
+  if (info.clinical) { cl.innerHTML = info.clinical; cl.style.display = ''; }
+  else               { cl.style.display = 'none'; }
+  tooltip.classList.add('visible');
+  positionTooltip(evt);
+}
+function hideTooltip() { tooltip.classList.remove('visible'); }
+function positionTooltip(evt) {
+  const pad=14, tw=tooltip.offsetWidth||300, th=tooltip.offsetHeight||140;
+  const vw=window.innerWidth, vh=window.innerHeight;
+  let x=evt.clientX+pad, y=evt.clientY+pad;
+  if (x+tw > vw-8) x = evt.clientX-tw-pad;
+  if (y+th > vh-8) y = evt.clientY-th-pad;
+  tooltip.style.left = x+'px';
+  tooltip.style.top  = y+'px';
+}
+document.addEventListener('mousemove', e => {
+  if (tooltip.classList.contains('visible')) positionTooltip(e);
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.score-card, tbody tr')) hideTooltip();
+});
+
+// ── Score card builder ─────────────────────────────────────────────────────
+function buildCards(data, containerId) {
+  const { hr, ct, hi, hsrs } = data;
+  const tier  = getTier(hsrs);
+  const hrAbn = hr  > THRESHOLDS.hr;
+  const ctAbn = ct  > THRESHOLDS.ct;
+  const hiAbn = hi  > THRESHOLDS.hi;
+
+  const cards = [
+    {
+      label:'HSRS Score', value:hsrs.toFixed(2), unit:'/ 10',
+      abnormal:false, isHsrs:true, tier,
+      tt:{ ...CLINICAL.hsrs[tier.cls], color:tier.color }
+    },
+    {
+      label:'Heart Rate', value:Math.round(hr), unit:'bpm', abnormal:hrAbn,
+      tt: hrAbn ? {...CLINICAL.hr.abnormal,color:'#f85149'}
+                : {...CLINICAL.hr.normal,  color:'#8b949e'}
+    },
+    {
+      label:'Core Temp (est.)', value:ct.toFixed(2), unit:'°C', abnormal:ctAbn,
+      tt: ctAbn ? {...CLINICAL.ct.abnormal,color:'#f85149'}
+                : {...CLINICAL.ct.normal,  color:'#8b949e'}
+    },
+    {
+      label:'Heat Index', value:hi.toFixed(2), unit:'°C', abnormal:hiAbn,
+      tt: hiAbn ? {...CLINICAL.hi.abnormal,color:'#f85149'}
+                : {...CLINICAL.hi.normal,  color:'#8b949e'}
+    },
+  ];
+
+  document.getElementById(containerId).innerHTML = cards.map(c => {
+    const abCls    = c.abnormal ? 'abnormal' : '';
+    const hsrsCls  = c.isHsrs  ? 'hsrs-card' : '';
+    const valColor = c.isHsrs  ? `color:${c.tier.color}`
+                   : c.abnormal ? 'color:var(--flag)' : '';
+    const badge    = c.isHsrs
+      ? `<span class="hsrs-tier-badge tier-pill ${c.tier.cls}">${c.tier.label}</span>` : '';
+    const border   = c.isHsrs ? `border-color:${c.tier.color}40` : '';
+    const ttStr    = JSON.stringify(c.tt).replace(/'/g,"&#39;");
+    return `
+      <div class="score-card ${abCls} ${hsrsCls}" style="${border}"
+           data-tt='${ttStr}'
+           onmouseenter="handleCardHover(event,this)"
+           onmouseleave="hideTooltip()">
+        <div class="flag-marker"></div>
+        <div class="card-label">${c.label}</div>
+        <div class="card-value" style="${valColor}">${c.value}</div>
+        <div class="card-unit">${c.unit}</div>
+        ${badge}
+      </div>`;
+  }).join('');
+}
+function handleCardHover(evt, el) {
+  try { showTooltip(evt, JSON.parse(el.dataset.tt)); } catch(e) {}
+}
+
+// ── Table row builder (shared by live + analysis) ─────────────────────────
+function buildTableRow(r, i, clickFn) {
+  const tier  = getTier(r.hsrs);
+  const hrAbn = r.hr > THRESHOLDS.hr;
+  const ctAbn = r.ct > THRESHOLDS.ct;
+  const hiAbn = r.hi > THRESHOLDS.hi;
+  const ttData = JSON.stringify({
+    title:    `${r.ts} — ${tier.label} Heat Stress`,
+    body:     CLINICAL.hsrs[tier.cls].body,
+    clinical: CLINICAL.hsrs[tier.cls].clinical,
+    color:    tier.color
+  }).replace(/'/g,"&#39;");
+  return `
+    <tr onclick="${clickFn}(${i})"
+        onmouseenter="handleRowHover(event,this)"
+        onmouseleave="hideTooltip()"
+        data-tt='${ttData}' id="${clickFn}-row-${i}">
+      <td style="color:var(--muted)">${i+1}</td>
+      <td style="color:var(--muted);font-size:11px">${r.ts}</td>
+      <td class="tier-${tier.cls}" style="font-weight:700">${r.hsrs.toFixed(2)}</td>
+      <td><span class="tier-pill ${tier.cls}">${tier.label}</span></td>
+      <td class="${hrAbn?'abnormal':''}">${Math.round(r.hr)}</td>
+      <td class="${ctAbn?'abnormal':''}">${r.ct.toFixed(2)}</td>
+      <td class="${hiAbn?'abnormal':''}">${r.hi.toFixed(2)}</td>
+      <td>${r.temp.toFixed(2)}</td>
+      <td>${r.hum}</td>
+    </tr>`;
+}
+function handleRowHover(evt, el) {
+  try { showTooltip(evt, JSON.parse(el.dataset.tt)); } catch(e) {}
+}
+
+// ── Live session state ─────────────────────────────────────────────────────
+let liveRows = [];
+
+function appendLiveRow(r) {
+  liveRows.push(r);
+  const i     = liveRows.length - 1;
+  const tbody = document.getElementById('live-table-body');
+
+  if (i === 0) {
+    document.getElementById('live-table-panel').style.display = '';
+    document.getElementById('live-stats-bar').style.display   = '';
+  }
+
+  tbody.insertAdjacentHTML('beforeend', buildTableRow(r, i, 'selectLiveRow'));
+
+  const hsrsVals = liveRows.map(r => r.hsrs);
+  const mean   = hsrsVals.reduce((a,b)=>a+b,0) / hsrsVals.length;
+  const peak   = Math.max(...hsrsVals);
+  const severe = liveRows.filter(r=>r.hsrs>=7).length;
+  const flags  = liveRows.filter(r=>
+    r.hr>THRESHOLDS.hr||r.ct>THRESHOLDS.ct||r.hi>THRESHOLDS.hi).length;
+
+  document.getElementById('ls-n').textContent      = liveRows.length;
+  document.getElementById('ls-mean').textContent   = mean.toFixed(2);
+  document.getElementById('ls-peak').textContent   = peak.toFixed(2);
+  document.getElementById('ls-severe').textContent = severe;
+  document.getElementById('ls-flags').textContent  = flags;
+  document.getElementById('live-table-meta').textContent =
+    `${liveRows.length} records received`;
+
+  buildCards({ hr:r.hr, ct:r.ct, hi:r.hi, hsrs:r.hsrs }, 'live-cards');
+  document.getElementById('live-meta').innerHTML =
+    `<span class="live-dot"></span>&nbsp;${r.ts}`;
+}
+
+function selectLiveRow(i) {
+  const r = liveRows[i]; if (!r) return;
+  document.querySelectorAll('#live-table-body tr')
+    .forEach(tr=>tr.classList.remove('row-selected'));
+  const tr = document.getElementById(`selectLiveRow-row-${i}`);
+  if (tr) { tr.classList.add('row-selected'); tr.scrollIntoView({block:'nearest'}); }
+  buildCards({hr:r.hr,ct:r.ct,hi:r.hi,hsrs:r.hsrs},'live-cards');
+  document.getElementById('live-meta').textContent = r.ts;
+}
+
+// ── BLE state machine ──────────────────────────────────────────────────────
+// Protocol identical to downloader.html: BEGIN:<name> / DATA:<b64> / END:<name>
+// Each decoded DATA chunk is appended to a UTF-8 line buffer.
+// Complete \n-terminated lines are immediately processed → HSRS → table row.
+
+let bleConn      = null;
+let bleRawBuf    = '';    // incoming character buffer (protocol lines)
+let bleLineBuf   = '';    // UTF-8 decoded content buffer (log lines)
+let bleReceiving = false;
+let bleTotalBytes = 0;
+
+function bleLog(s) {
+  const el = document.getElementById('ble-log');
+  el.textContent += s + '\n';
+  el.scrollTop    = el.scrollHeight;
+}
+function setBLEStatus(s) { document.getElementById('ble-status').textContent = s; }
+
+function setProgress(bytes, label) {
+  document.getElementById('progress-wrap').style.display = '';
+  // We don't know total size in advance; animate indeterminate-style by cycling
+  const pct = Math.min(100, (bytes / 1024 / 50) * 100 % 100); // cycles every 50KB
+  document.getElementById('progress-fill').style.width  = pct + '%';
+  document.getElementById('progress-label').textContent = label;
+}
+
+// onBLEData is a Puck.js 'data' event callback — Puck.js does not await it, and
+// new events can arrive while a previous call is still mid-await (scoring is
+// async). bleRawBuf, the Kalman filter, and the 10-min bucket accumulator
+// are shared mutable state, so two overlapping calls would corrupt them. Chain
+// every call through _bleQueue so each chunk fully finishes (all its awaits)
+// before the next one starts.
+let _bleQueue = Promise.resolve();
+function onBLEData(d) {
+  _bleQueue = _bleQueue
+    .then(() => onBLEDataAsync(d))
+    .catch(e => bleLog('⚠ BLE processing error: ' + e.message));
+}
+async function onBLEDataAsync(d) {
+  bleRawBuf += d;
+  let idx;
+  while ((idx = bleRawBuf.indexOf('\n')) >= 0) {
+    const line   = bleRawBuf.slice(0, idx).trim();
+    bleRawBuf    = bleRawBuf.slice(idx + 1);
+    if (!line) continue;
+
+    if (line.startsWith('BEGIN:')) {
+      clearNoResponseWarning();  // the watch did respond — cancel the timeout warning
+      bleReceiving = true;
+      bleTotalBytes = 0;
+      bleLineBuf = '';
+      resetKalman();   // fresh Kalman state for this session's data
+      resetBucket();   // fresh 10-min bucket accumulator
+      liveRows   = []; // clear previous session rows
+      document.getElementById('live-table-body').innerHTML = '';
+      document.getElementById('live-table-panel').style.display = 'none';
+      document.getElementById('live-stats-bar').style.display   = 'none';
+      bleLog('▶ Transfer started: ' + line.slice(6));
+      setBLEStatus('Receiving data…');
+      setProgress(0, 'Starting transfer…');
+
+    } else if (line.startsWith('DATA:') && bleReceiving) {
+      // Decode base64 chunk to UTF-8 text
+      let decoded = '';
+      try {
+        const b64  = line.slice(5);
+        const bin  = atob(b64);
+        // atob gives latin-1 bytes; re-encode to UTF-8 string via TextDecoder
+        const bytes = new Uint8Array(bin.length);
+        for (let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
+        decoded = new TextDecoder('utf-8').decode(bytes);
+        bleTotalBytes += bytes.length;
+      } catch(e) {
+        bleLog('⚠ Base64 decode error: ' + e.message);
+        continue;
+      }
+
+      // Append decoded text to line buffer and process complete lines immediately
+      bleLineBuf += decoded;
+      let nl;
+      while ((nl = bleLineBuf.indexOf('\n')) >= 0) {
+        const jsonLine = bleLineBuf.slice(0, nl).trim();
+        bleLineBuf     = bleLineBuf.slice(nl + 1);
+        if (!jsonLine) continue;
+        await processLogLine(jsonLine);
+      }
+
+      setProgress(bleTotalBytes,
+        `Receiving… ${(bleTotalBytes/1024).toFixed(1)} KB · ${liveRows.length} records`);
+
+    } else if (line.startsWith('END:') && bleReceiving) {
+      bleReceiving = false;
+      // Flush any remaining partial line, then close the final 10-min bucket
+      if (bleLineBuf.trim()) await processLogLine(bleLineBuf.trim());
+      bleLineBuf = '';
+      const lastRec = await flushBucket();
+      if (lastRec) appendLiveRow(lastRec);
+      bleLog(`✓ Transfer complete — ${liveRows.length} records, ${(bleTotalBytes/1024).toFixed(1)} KB`);
+      setBLEStatus(`Done — ${liveRows.length} records loaded`);
+      document.getElementById('progress-label').textContent =
+        `Complete · ${liveRows.length} records · ${(bleTotalBytes/1024).toFixed(1)} KB`;
+      document.getElementById('progress-fill').style.width = '100%';
+
+    } else if (line.startsWith('!ERR:')) {
+      clearNoResponseWarning();  // the watch did respond — just with an error
+      bleLog('✗ Watch error: ' + line.slice(5));
+      setBLEStatus('Watch reported an error — see log');
+    } else {
+      bleLog('watch: ' + line);
+    }
+  }
+}
+
+// Process one decoded 1-min JSON line: feed the 10-min bucketer; when a bucket
+// closes, the returned 10-min record is scored (Kalman → HI → rubric) and shown.
+async function processLogLine(jsonLine) {
+  let row;
+  try   { row = JSON.parse(jsonLine); }
+  catch (e) { bleLog('⚠ Skipped malformed line'); return; }
+
+  if (row.hr == null || row.temp == null || row.w_hum == null) {
+    bleLog(`⚠ Skipped row missing hr/temp/w_hum (ts=${row.ts||'?'})`);
+    return;
+  }
+  const rec = await feedRaw(row);
+  if (rec) appendLiveRow(rec);
+}
+
+// Send the Espruino download snippet immediately after connect
+// Mirrors the exact protocol from downloader.html
+function requestLogFromWatch() {
+  const FILENAME = 'upload.log';
+  const CHUNK    = 265;    // matches downloader.html
+  const DELAY    = 30;     // ms between chunks
+  const MINUTES  = 60;     // only the last hour (log is 1 line/min → last 60 lines)
+
+  // Watch-side: read the file COOPERATIVELY (setTimeout yields between reads so
+  // the BLE stack keeps getting serviced — a blocking while-loop freezes the
+  // watch and drops the connection), keep only the last MINUTES lines (rolling
+  // tail), then stream just those. "\x10" (Ctrl-P) suppresses the REPL echo.
+  const code = "\x10" +
+    `var n=${JSON.stringify(FILENAME)},f=require("Storage").open(n,"r"),KEEP=${MINUTES},buf="",tail=[];` +
+    `if(!f){Bluetooth.println("!ERR:OPEN_FAILED:"+n);}else{` +
+    `var rd=function(){var s=f.read(256);` +
+    `if(s){buf+=s;var i;while((i=buf.indexOf("\\n"))>=0){tail.push(buf.substr(0,i));buf=buf.substr(i+1);if(tail.length>KEEP)tail.shift();}setTimeout(rd,5);}` +
+    `else{if(buf.length){tail.push(buf);if(tail.length>KEEP)tail.shift();}` +
+    `var payload=tail.join("\\n")+"\\n";Bluetooth.println("BEGIN:"+n);var p=0;` +
+    `var snd=function(){if(p>=payload.length){Bluetooth.println("END:"+n);return;}Bluetooth.println("DATA:"+btoa(payload.substr(p,${CHUNK})));p+=${CHUNK};setTimeout(snd,${DELAY});};snd();}};rd();}\n`;
+
+  bleLog('→ Requesting upload.log from watch…');
+  setBLEStatus('Requesting data…');
+
+  // Callback contract, confirmed by reading puck.js's own source directly
+  // (this was NOT a timing issue — the previous "Write to watch failed" /
+  // retry logic here was based on a wrong assumption about this library):
+  //   bleConn.write(data, cb) — cb() fires with NO ARGUMENTS once every
+  //   queued chunk has actually been sent. On a genuine send error it does
+  //   NOT call cb at all; it just closes the connection instead (see the
+  //   'close' listener registered in bleConnect()). So "cb fired" already
+  //   means success — there is no ok/success boolean to check, and treating
+  //   a callback call with `ok === undefined` as failure (the previous code)
+  //   misreported every successful write as failed, and then the old retry
+  //   logic could have been re-sending this same command on top of a write
+  //   that had already succeeded, double-triggering the watch-side script.
+  //   Puck.write (global fallback — practically never used, since
+  //   bleConn.write is always defined once Puck.connect succeeds) has a
+  //   different contract entirely: cb(value, err).
+  const usingConnWrite = !!(bleConn && bleConn.write);
+  const writeFn = usingConnWrite ? bleConn.write.bind(bleConn) : Puck.write;
+
+  function onSent() {
+    bleLog('✓ Command sent — waiting for watch to respond…');
+    scheduleNoResponseWarning();
+  }
+
+  if (usingConnWrite) {
+    writeFn(code, onSent);
+  } else {
+    writeFn(code, (value, err) => {
+      if (err) {
+        bleLog('✗ Write to watch failed — ' + err);
+        setBLEStatus('Failed to send request — check connection');
+      } else {
+        onSent();
+      }
+    });
+  }
+}
+
+// The write callback above only confirms bytes were handed to the BLE stack,
+// not that the watch understood/executed them — e.g. if the watch is running
+// something other than the expected background logger, it may never send
+// BEGIN:upload.log back. Surface that instead of just sitting on "Waiting for
+// data…" forever. Cleared as soon as a real BEGIN: line arrives (see
+// onBLEDataAsync's BEGIN: branch).
+let _noResponseTimer = null;
+function scheduleNoResponseWarning() {
+  clearNoResponseWarning();
+  _noResponseTimer = setTimeout(() => {
+    bleLog('⚠ No response from watch within 8s after sending the command. ' +
+           'The write reached the BLE stack, but the watch never sent BEGIN:upload.log back — ' +
+           'check that it\'s running the expected background logger (not some other app/firmware ' +
+           'that also listens on the Nordic UART service).');
+    setBLEStatus('No response from watch — check watch app/firmware');
+  }, 8000);
+}
+function clearNoResponseWarning() {
+  if (_noResponseTimer) { clearTimeout(_noResponseTimer); _noResponseTimer = null; }
+}
+
+async function bleConnect() {
+  setBLEStatus('Connecting…');
+  try {
+    await new Promise((resolve, reject) => {
+      Puck.connect(c => {
+        if (!c) return reject(new Error('User cancelled or device not found.'));
+        bleConn = c;
+        if (c.on) {
+          c.on('data', onBLEData);
+          // puck.js's connection.write() never invokes its callback on a
+          // genuine send error — it just closes the connection instead. This
+          // is the only real failure signal that write path gives us.
+          c.on('close', () => {
+            clearNoResponseWarning();
+            bleLog('⚠ BLE connection closed unexpectedly');
+            bleDisconnect();
+          });
+        }
+        resolve();
+      });
+    });
+
+    // Update UI
+    document.getElementById('btn-connect').disabled    = true;
+    document.getElementById('btn-disconnect').disabled = false;
+    document.getElementById('conn-badge').classList.add('connected');
+    document.getElementById('conn-label').textContent = 'Connected';
+    bleLog('✓ BLE connection established');
+
+    // Auto-request the log file immediately
+    requestLogFromWatch();
+
+  } catch(e) {
+    setBLEStatus('Connection failed — ' + e.message);
+    bleLog('✗ ' + e.message);
+  }
+}
+
+function bleDisconnect() {
+  try { if (bleConn && bleConn.close) bleConn.close(); } catch(e) {}
+  bleConn      = null;
+  bleReceiving = false;
+  bleRawBuf    = '';
+  setBLEStatus('Disconnected');
+  document.getElementById('btn-connect').disabled    = false;
+  document.getElementById('btn-disconnect').disabled = true;
+  document.getElementById('conn-badge').classList.remove('connected');
+  document.getElementById('conn-label').textContent = 'Disconnected';
+  document.getElementById('live-meta').textContent  = 'Disconnected';
+  document.getElementById('progress-wrap').style.display = 'none';
+  bleLog('Connection closed.');
+}
+
+// ── Analysis mode — file upload ────────────────────────────────────────────
+let sessionRows = [];
+
+function handleFileUpload(evt) {
+  const file = evt.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const text = e.target.result;
+    const ext  = file.name.split('.').pop().toLowerCase();
+    try {
+      if (ext === 'csv') await parseCSV(text, file.name);
+      else               await parseLogFile(text, file.name);
+    } catch(err) {
+      document.getElementById('upload-status').textContent = '✗ ' + err.message;
+    }
+  };
+  reader.readAsText(file);
+  evt.target.value = '';
+}
+
+async function parseCSV(text, fname) {
+  const lines   = text.trim().split('\n').filter(Boolean);
+  if (lines.length < 2) throw new Error('CSV has no data rows');
+  const headers = lines[0].split(',').map(h=>h.trim());
+  const need    = ['hr','temp','w_hum','CT','HI_Rothfusz','Final_Three_HSRS'];
+  const missing = need.filter(c=>!headers.includes(c));
+  if (missing.length) throw new Error('Missing columns: ' + missing.join(', '));
+
+  const rows = [];
+  for (const line of lines.slice(1)) {          // sequential, not .map — each
+    const vals = line.split(',');                // row awaits the (async) scoring call
+    const r    = {};
+    headers.forEach((h,i) => r[h] = (vals[i]||'').trim());
+    const hr=+r.hr, temp=+r.temp, hum=+r.w_hum, ct=+r.CT, hi=+r.HI_Rothfusz;
+    const hsrs = rubricHSRS(ct, hr, hi);  // HSRS computed directly from the closed-form rubric
+    if (isNaN(hsrs)) continue;
+    rows.push({
+      ts: r.ts || '—',
+      hr, temp, hum, ct, hi, hsrs,
+      hsrs_rubric: +r.Final_Three_HSRS,           // pre-computed rubric (cross-check)
+      source:'csv'
+    });
+  }
+  sessionRows = rows;
+
+  document.getElementById('upload-status').textContent =
+    `✓ ${fname} — ${sessionRows.length} rows (HSRS from CSV features)`;
+  renderAnalysisTable();
+}
+
+async function parseLogFile(text, fname) {
+  const lines   = text.trim().split('\n').filter(Boolean);
+  const rawRows = [];
+  for (const l of lines) {
+    try { rawRows.push(JSON.parse(l)); } catch(e) {}
+  }
+  if (!rawRows.length) throw new Error('No valid JSON lines found');
+
+  const sample = rawRows[0];
+  ['hr','temp','w_hum'].forEach(f => {
+    if (!(f in sample)) throw new Error(`Missing field "${f}"`);
+  });
+
+  // Raw log is 1-min → bucket to 10-min (§6.1), then score each bucket with the rubric.
+  resetKalman(); resetBucket();
+  sessionRows = [];
+  for (const row of rawRows) {
+    const rec = await feedRaw(row);
+    if (rec) { rec.source = 'log'; sessionRows.push(rec); }
+  }
+  const last = await flushBucket();
+  if (last) { last.source = 'log'; sessionRows.push(last); }
+
+  document.getElementById('upload-status').textContent =
+    `✓ ${fname} — ${sessionRows.length} 10-min records (in-browser)`;
+  renderAnalysisTable();
+}
+
+// ── Analysis table sort state ──────────────────────────────────────────────
+// sortKey: field name in sessionRows; sortDir: 'asc' | 'desc'
+let sortKey = 'ts';
+let sortDir = 'asc';
+
+// Column definitions: label, field key, type ('str' | 'num')
+const ANALYSIS_COLS = [
+  { label: 'Timestamp',      key: 'ts',   type: 'str' },
+  { label: 'HSRS',           key: 'hsrs', type: 'num' },
+  { label: 'Tier',           key: 'hsrs', type: 'num' },   // sorts by hsrs value
+  { label: 'HR (bpm)',       key: 'hr',   type: 'num' },
+  { label: 'Core Temp (°C)', key: 'ct',   type: 'num' },
+  { label: 'Heat Index (°C)',key: 'hi',   type: 'num' },
+  { label: 'Amb. Temp (°C)', key: 'temp', type: 'num' },
+  { label: 'Humidity (%)',   key: 'hum',  type: 'num' },
+];
+
+function sortedSessionRows() {
+  const col = ANALYSIS_COLS.find(c => c.key === sortKey) || ANALYSIS_COLS[0];
+  return [...sessionRows].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    let cmp;
+    if (col.type === 'str') cmp = String(av).localeCompare(String(bv));
+    else                    cmp = av - bv;
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function buildAnalysisThead() {
+  const ths = ANALYSIS_COLS.map(col => {
+    const active = col.key === sortKey;
+    // For Tier column (key === 'hsrs' second occurrence), use a distinct id
+    const isTier = col.label === 'Tier';
+    const icon   = active ? (sortDir === 'asc' ? '▲' : '▼') : '▲';
+    const cls    = ['sortable', active ? `sort-${sortDir}` : ''].join(' ');
+    return `<th class="${cls}" onclick="sortAnalysisBy('${col.key}','${col.label}')"
+              title="Sort by ${col.label}">
+              ${col.label}<em class="sort-icon">${icon}</em>
+            </th>`;
+  });
+  // Prepend non-sortable # column
+  return `<tr><th>#</th>${ths.join('')}</tr>`;
+}
+
+function sortAnalysisBy(key, label) {
+  // If same key clicked again (accounting for Tier sharing key 'hsrs' with HSRS),
+  // toggle direction; otherwise set new key ascending.
+  // Tier and HSRS both sort by 'hsrs' — treat them as the same column.
+  if (key === sortKey) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortKey = key;
+    sortDir = 'asc';
+  }
+  renderAnalysisTableBody();
+}
+
+function renderAnalysisTable() {
+  if (!sessionRows.length) return;
+  switchMode('analysis');
+
+  const hsrsVals = sessionRows.map(r=>r.hsrs);
+  const mean     = hsrsVals.reduce((a,b)=>a+b,0)/hsrsVals.length;
+  const peak     = Math.max(...hsrsVals);
+  const nSevere  = sessionRows.filter(r=>r.hsrs>=7).length;
+  const nHigh    = sessionRows.filter(r=>r.hsrs>=5&&r.hsrs<7).length;
+  const nFlags   = sessionRows.filter(r=>
+    r.hr>THRESHOLDS.hr||r.ct>THRESHOLDS.ct||r.hi>THRESHOLDS.hi).length;
+
+  document.getElementById('stat-n').textContent      = sessionRows.length;
+  document.getElementById('stat-mean').textContent   = mean.toFixed(2);
+  document.getElementById('stat-peak').textContent   = peak.toFixed(2);
+  document.getElementById('stat-severe').textContent = nSevere;
+  document.getElementById('stat-high').textContent   = nHigh;
+  document.getElementById('stat-flags').textContent  = nFlags;
+  document.getElementById('stats-bar').style.display = '';
+  document.getElementById('table-meta').textContent  =
+    `${sessionRows.length} records · ${sessionRows[0].source==='csv'
+      ? 'Python-processed CSV' : 'Raw log (in-browser computation)'}`;
+
+  // Reset sort to default (ts asc) on new file load
+  sortKey = 'ts';
+  sortDir = 'asc';
+
+  document.getElementById('table-container').innerHTML = `
+    <div class="data-table-wrap">
+      <table id="analysis-table">
+        <thead id="analysis-thead">${buildAnalysisThead()}</thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>`;
+
+  renderAnalysisTableBody();
+}
+
+function renderAnalysisTableBody() {
+  // Rebuild thead to update sort indicators
+  document.getElementById('analysis-thead').innerHTML = buildAnalysisThead();
+
+  // Sort a display copy — sessionRows index preserved via data attribute
+  const display = sortedSessionRows().map((r, displayIdx) => {
+    // Find original index for stable row ID and selectAnalysisRow lookup
+    const origIdx = sessionRows.indexOf(r);
+    return buildTableRow(r, origIdx, 'selectAnalysisRow');
+  });
+
+  document.getElementById('table-body').innerHTML = display.join('');
+}
+
+function selectAnalysisRow(i) {
+  const r = sessionRows[i]; if (!r) return;
+  document.querySelectorAll('#table-body tr')
+    .forEach(tr=>tr.classList.remove('row-selected'));
+  const tr = document.getElementById(`selectAnalysisRow-row-${i}`);
+  if (tr) { tr.classList.add('row-selected'); tr.scrollIntoView({block:'nearest'}); }
+  buildCards({hr:r.hr,ct:r.ct,hi:r.hi,hsrs:r.hsrs},'snapshot-cards');
+  document.getElementById('snapshot-ts').textContent = r.ts;
+  document.getElementById('panel-snapshot').style.display = '';
+  document.getElementById('panel-snapshot').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// ── Status banner ──────────────────────────────────────────────────────────
+function updateModelBanner() {
+  const el = document.getElementById('ble-log');
+  if (!el) return;
+  el.textContent =
+    `BUILD ${APP_BUILD}  (if this tag is missing/older, the browser is serving a CACHED page — hard-reload)\n` +
+    `HSRS: closed-form rubric (CT, HR, HI) · 10-min bucketing active\nWaiting for connection…\n`;
+}
+updateModelBanner();
+</script>
+
+</body>
+</html>
